@@ -1,0 +1,246 @@
+## Upload Data
+
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(lubridate)
+library(stringr)
+library(knitr)
+emergency_data <- read_excel("~/Documents/Emergency_Notifs_for_CED/data/input/04.07.25 Updated Emergency Services Team - Tracking Form.xlsx")
+```
+
+## Data Preparation and Cleaning
+
+```{r}
+# Drop Empty Column
+emergency_data$`Form Field 1` <- NULL
+
+# Standardize column names (replace spaces and hyphens with underscores)
+names(emergency_data) <- gsub(" ", "_", names(emergency_data))
+names(emergency_data) <- gsub("-", "_", names(emergency_data))
+names(emergency_data) <- gsub("#_of", "Num_of", names(emergency_data))
+names(emergency_data) <- gsub("___", "_", names(emergency_data))
+
+# Print column names to verify
+print("Column names after standardization:")
+print(names(emergency_data)) # Looks good
+```
+
+## Extract Values
+
+```{r}
+# Function to handle multiple districts in a single record
+expand_multiple_districts <- function(data) {
+  # Create an empty result dataframe
+  result <- data.frame()
+  
+  # Process each row in the original dataframe
+  for (i in 1:nrow(data)) {
+    row <- data[i, ]
+    # Check if the row contains multiple districts (pattern: district-name district-name)
+    district_member_entries <- str_extract_all(row$Council_District_Member, "\\d+\\s*[-_]\\s*[A-Za-z]+")[[1]]
+    
+    if (length(district_member_entries) > 1) {
+      # Multiple districts found, create a row for each
+      for (entry in district_member_entries) {
+        new_row <- row
+        new_row$Council_District_Member <- entry
+        result <- rbind(result, new_row)
+      }
+    } else {
+      # Single district, add row as-is
+      result <- rbind(result, row)
+    }
+  }
+  
+  return(result)
+}
+
+# Expand rows with multiple districts
+emergency_data <- expand_multiple_districts(emergency_data)
+
+# Extract district numbers and member names from Council_District___Member column
+emergency_data <- emergency_data %>%
+  mutate(
+    Council_District = as.numeric(str_extract(Council_District_Member, "\\d+")),
+    Council_Member = str_extract(Council_District_Member, "-.*$|_.+$") %>% 
+                     str_replace("^-\\s*|^-|^_", "") %>%
+                     str_trim())
+
+# # Define NYC Borough mapping (version 1: dual categories for 8, 34, 50)
+# # Source: https://council.nyc.gov/districts/
+# nyc_borough_mapping <- data.frame(
+#   Council_District = 1:51,
+#   Primary_Borough = c(
+#     rep("Manhattan", 7),    # Districts 1-7
+#     "Manhattan/Bronx",      # District 8
+#     rep("Manhattan", 2),    # Districts 9-10
+#     rep("Bronx", 8),        # Districts 11-18
+#     rep("Queens", 14),      # Districts 19-32
+#     "Brooklyn",             # District 33
+#     "Brooklyn/Queens",      # District 34
+#     rep("Brooklyn", 14),    # Districts 35-48
+#     "Staten Island",        # District 49
+#     "Staten Island/Brooklyn", # District 50
+#     "Staten Island"         # District 51
+#   )
+# )
+
+
+# Define NYC Borough mapping (version 2: suplicate rows for 8, 34, 50)
+# Source: https://council.nyc.gov/districts/
+nyc_borough_mapping <- data.frame(
+  Council_District = c(
+    # Standard district assignments
+    1:7,        # Manhattan only
+    9:10,       # Manhattan only
+    11:18,      # Bronx only
+    19:33,      # Queens only (excluding 34)
+    35:48,      # Brooklyn only
+    49, 51,     # Staten Island only
+    
+    # Multi-borough districts (duplicated entries)
+    8, 8,        # District 8: Manhattan and Bronx
+    34, 34,      # District 34: Brooklyn and Queens
+    50, 50       # District 50: Staten Island and Brooklyn
+  ),
+  Borough = c(
+    # Standard district assignments
+    rep("Manhattan", 7),
+    rep("Manhattan", 2),
+    rep("Bronx", 8),
+    rep("Queens", 15), 
+    rep("Brooklyn", 14),
+    rep("Staten Island", 2),
+    
+    # Multi-borough districts (duplicated with appropriate boroughs)
+    "Manhattan", "Bronx",
+    "Brooklyn", "Queens",
+    "Staten Island", "Brooklyn"
+  )
+)
+
+# Join to your data
+emergency_data <- emergency_data %>%
+  left_join(nyc_borough_mapping, by = "Council_District")
+
+# Replace NA with appropriate verbiage 
+emergency_data <- emergency_data %>%
+  mutate(across(c("Council_District"), ~ifelse(is.na(.), "All Districts", as.character(.))))
+
+emergency_data <- emergency_data %>%
+  mutate(across(c("Council_Member"), ~replace_na(., "All Members")))
+
+emergency_data <- emergency_data %>%
+  mutate(across(c("Borough"), ~replace_na(., "All Boroughs")))
+
+# Filter out anything not in 2023 or 2024 (two weird points in 2004 and 2027)
+emergency_data <- emergency_data %>%
+  filter(year(Date_of_Incident) == 2023 | year(Date_of_Incident) == 2024)
+```
+
+## Analysis 1: Top Incident Types
+
+```{r}
+# Arrange in descending order the most common Incidents
+incident_counts <- emergency_data %>%
+  count(Incident, sort = TRUE) %>%
+  rename(Count = n)
+
+print("Analysis 1: Top incident types")
+print(incident_counts)
+```
+
+## Analysis 2: Top 3 Incident Types by District
+
+```{r}
+# Arrange in descneding order top incident types by council district
+top_incidents_by_district <- emergency_data %>%
+  group_by(Council_District, Incident) %>%
+  summarize(Count = n(), .groups = "drop") %>%
+  group_by(Council_District) %>%
+  arrange(desc(Count)) %>%
+  slice_head(n = 3) %>%
+  ungroup() %>%
+  arrange(Council_District)
+
+print("Analysis 2: Top 3 incident types by council district")
+print(top_incidents_by_district)
+```
+
+## Analysis 2.5: Total Incidents by District
+
+```{r}
+# Count total incidents by district
+incidents_by_district <- emergency_data %>%
+  group_by(Council_District) %>%
+  summarize(Total_Incidents = n(), .groups = "drop") %>%
+  arrange(desc(Total_Incidents))
+
+print("Analysis 2.5: Total number of incidents by council district")
+print(incidents_by_district)
+```
+
+## Analysis 3: Top 3 Incident Types by Borough
+
+```{r}
+# Arrange in descneding order top incident types by borough
+top_incidents_by_borough <- emergency_data %>%
+  group_by(Borough, Incident) %>%
+  summarize(Count = n(), .groups = "drop") %>%
+  group_by(Borough) %>%
+  arrange(desc(Count)) %>%
+  slice_head(n = 3) %>%
+  ungroup() %>%
+  arrange(Borough)
+
+print("Analysis 3: Top 3 incident types by borough")
+print(top_incidents_by_borough)
+```
+
+## Analysis 3.5: Total Incidents by Borough
+
+```{r}
+# Count total incidents by borough
+incidents_by_borough <- emergency_data %>%
+  group_by(Borough) %>%
+  summarize(Total_Incidents = n(), .groups = "drop") %>%
+  arrange(desc(Total_Incidents))
+
+print("Analysis 3.5: Total number of incidents by borough")
+print(incidents_by_borough)
+```
+
+## Analysis 4: Trends 
+
+```{r}
+# Incidents per month 
+incidents_by_month <- emergency_data %>%
+  mutate(Month = floor_date(Date_of_Incident, "month")) %>%
+  group_by(Month) %>%
+  summarize(Total_Incidents = n(), .groups = "drop") %>%
+  arrange(Month)
+
+print("Analysis 4: Trends in numbers of incidents over time (monthly)")
+print(incidents_by_month)
+
+# Creating a time series plot
+monthly_plot <- ggplot(incidents_by_month, aes(x = Month, y = Total_Incidents)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Monthly Emergency Incidents",
+       x = "Month",
+       y = "Number of Incidents") +
+  theme_minimal()
+
+print(monthly_plot)
+```
+
+
+
+
+
+
+
