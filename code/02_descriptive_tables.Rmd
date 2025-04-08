@@ -219,15 +219,18 @@ incidents_by_month %>%
   row_spec(0, bold = TRUE, background = "#f2f2f2")
 
 # Creating an enhanced time series plot
+nycc_palette <- pal_nycc()
 monthly_plot <- ggplot(incidents_by_month, aes(x = Month, y = Total_Incidents)) +
-  geom_line(size = 0.5) +
-  geom_point(size = 3) +
-  scale_color_nycc() +
+  geom_line(size = 0.5, color = nycc_palette[2]) +
+  geom_point(size = 2, color = nycc_palette[2]) +
   labs(title = "Monthly Emergency Incidents",
        subtitle = "Trend Analysis of Emergency Notifications",
        x = "Month",
        y = "Number of Incidents") +
-  theme_nycc() 
+  theme_nycc() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
 
 print(monthly_plot)
 ```
@@ -267,9 +270,11 @@ monthly_borough_plot <- ggplot(incidents_by_month_borough,
        x = "Month",
        y = "Number of Incidents",
        color = "Borough") +
-  theme_nycc() 
+  theme_nycc() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
   
-
 print(monthly_borough_plot)
 ```
 
