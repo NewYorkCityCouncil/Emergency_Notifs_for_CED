@@ -1,4 +1,4 @@
-## Upload Data
+## Load Libraries
 
 ```{r}
 library(readxl)
@@ -9,6 +9,11 @@ library(ggplot2)
 library(lubridate)
 library(stringr)
 library(knitr)
+```
+
+## Upload Data
+
+```{r}
 emergency_data <- read_excel("~/Documents/Emergency_Notifs_for_CED/data/input/04.07.25 Updated Emergency Services Team - Tracking Form.xlsx")
 ```
 
@@ -160,6 +165,7 @@ emergency_data <- emergency_data %>%
 ## Save Data
 
 ```{r}
+# Write to Excel
 write_xlsx(emergency_data, "~/Documents/Emergency_Notifs_for_CED/data/output/emergency_data_cleaned.xlsx")
 ```
 

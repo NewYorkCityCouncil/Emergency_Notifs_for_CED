@@ -1,4 +1,34 @@
-## Load Data
+---
+title: "Emergency Notifications for CED"
+author: "Danylo Orlov, NYCC Data Team"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    highlight: tango
+    keep_md: true  # This creates the intermediary .md file
+  pdf_document:
+    toc: true
+  word_document:
+    toc: true
+---
+
+```{r}
+# Set global chunk options
+knitr::opts_chunk$set(
+  echo = TRUE,           # Show code chunks in output
+  warning = FALSE,       # Don't show warnings
+  message = FALSE,       # Don't show messages
+  fig.width = 10,        # Default figure width
+  fig.height = 6,        # Default figure height
+  dpi = 300,             # Figure resolution
+  fig.path = "figures/"  # Path to save figures
+)
+```
+
+## Load Libraries
 
 ```{r}
 library(readxl)
@@ -9,9 +39,16 @@ library(ggplot2)
 library(lubridate)
 library(stringr)
 library(knitr)
+library(kableExtra)
 library(councilcount)
 library(councildown)
 library(councilverse)
+```
+
+## Uplaod File
+
+```{r}
+# Uplaod from Excel
 emergency_data <- read_excel("~/Documents/Emergency_Notifs_for_CED/data/output/emergency_data_cleaned.xlsx")
 ```
 
@@ -23,25 +60,56 @@ incident_counts <- emergency_data %>%
   count(Incident, sort = TRUE) %>%
   rename(Count = n)
 
-print("Analysis 1: Top incident types")
-print(incident_counts)
+# Create a nice looking table
+incident_counts %>%
+  kable(col.names = c("Incident Type", "Number of Occurrences"),
+        caption = "Frequency of Emergency Incident Types, All Districts") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#f2f2f2") %>%
+  row_spec(1:3, background = "#f8f8f8", color = "red")
 ```
 
 ## Analysis 2: Top 3 Incident Types by District
 
 ```{r}
-# Arrange in descneding order top incident types by council district
+# Arrange in descending order top incident types by council district
 top_incidents_by_district <- emergency_data %>%
   group_by(Council_District, Incident) %>%
   summarize(Count = n(), .groups = "drop") %>%
   group_by(Council_District) %>%
   arrange(desc(Count)) %>%
   slice_head(n = 3) %>%
-  ungroup() %>%
-  arrange(Council_District)
+  ungroup()
 
-print("Analysis 2: Top 3 incident types by council district")
-print(top_incidents_by_district)
+# Create a custom sorting function for districts
+district_order <- function(x) {
+  # Convert district to character if it's not already
+  x <- as.character(x)
+  # Create a numeric value for sorting
+  ifelse(x == "All Districts", 100, # Put "All Districts" at the end
+         ifelse(grepl("^\\d+$", x), as.numeric(x), 99)) # Convert numeric districts to numbers, others to 99
+}
+
+# Sort the data by district using the custom function
+top_incidents_by_district <- top_incidents_by_district %>%
+  mutate(sort_order = district_order(Council_District)) %>%
+  arrange(sort_order) %>%
+  select(-sort_order)
+
+# Create a nice looking table without group_rows which is causing the error
+top_incidents_by_district %>%
+  kable(col.names = c("Council District", "Incident Type", "Frequency"),
+        caption = "Top 3 Emergency Incident Types by Council District") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#f2f2f2") %>%
+  # Add alternating background color for different districts
+  row_spec(which(duplicated(top_incidents_by_district$Council_District) == FALSE), 
+           extra_css = "border-top: 2px solid #666;") %>%
+  footnote(general = "Note: Only top 3 incidents shown per district", 
+           general_title = "",
+           footnote_as_chunk = TRUE)
 ```
 
 ## Analysis 2.5: Total Incidents by District
@@ -50,17 +118,36 @@ print(top_incidents_by_district)
 # Count total incidents by district
 incidents_by_district <- emergency_data %>%
   group_by(Council_District) %>%
-  summarize(Total_Incidents = n(), .groups = "drop") %>%
-  arrange(desc(Total_Incidents))
+  summarize(Total_Incidents = n(), .groups = "drop")
 
-print("Analysis 2.5: Total number of incidents by council district")
-print(incidents_by_district)
+# Create a custom sorting function for districts
+district_order <- function(x) {
+  # Convert district to character if it's not already
+  x <- as.character(x)
+  # Create a numeric value for sorting
+  ifelse(x == "All Districts", 100, # Put "All Districts" at the end
+         ifelse(grepl("^\\d+$", x), as.numeric(x), 99)) # Convert numeric districts to numbers, others to 99
+}
+
+# Sort the data by district using the custom function
+incidents_by_district <- incidents_by_district %>%
+  mutate(sort_order = district_order(Council_District)) %>%
+  arrange(sort_order) %>%
+  select(-sort_order)
+
+# Create a nice looking table with minimal styling
+incidents_by_district %>%
+  kable(col.names = c("Council District", "Total Emergency Incidents"),
+        caption = "Total Number of Emergency Incidents by Council District") %>%
+  kable_styling(bootstrap_options = c("hover", "responsive"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#f2f2f2")
 ```
 
 ## Analysis 3: Top 3 Incident Types by Borough
 
 ```{r}
-# Arrange in descneding order top incident types by borough
+# Arrange in descending order top incident types by borough
 top_incidents_by_borough <- emergency_data %>%
   group_by(Borough, Incident) %>%
   summarize(Count = n(), .groups = "drop") %>%
@@ -70,8 +157,20 @@ top_incidents_by_borough <- emergency_data %>%
   ungroup() %>%
   arrange(Borough)
 
-print("Analysis 3: Top 3 incident types by borough")
-print(top_incidents_by_borough)
+# Create a nice looking table without group_rows which is causing the error
+top_incidents_by_borough %>%
+  kable(col.names = c("Borough", "Incident Type", "Frequency"),
+        caption = "Top 3 Emergency Incident Types by Borough") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#f2f2f2") %>%
+  # Add alternating background color for different boroughs
+  row_spec(which(duplicated(top_incidents_by_borough$Borough) == FALSE), 
+           extra_css = "border-top: 2px solid #666;") %>%
+  column_spec(3, bold = TRUE) %>%
+  footnote(general = "Note: Only top 3 incidents shown per borough", 
+           general_title = "",
+           footnote_as_chunk = TRUE)
 ```
 
 ## Analysis 3.5: Total Incidents by Borough
@@ -81,10 +180,19 @@ print(top_incidents_by_borough)
 incidents_by_borough <- emergency_data %>%
   group_by(Borough) %>%
   summarize(Total_Incidents = n(), .groups = "drop") %>%
-  arrange(desc(Total_Incidents))
+  arrange(Borough)  # Simple alphabetical sort for boroughs
 
-print("Analysis 3.5: Total number of incidents by borough")
-print(incidents_by_borough)
+# Add percentage column
+incidents_by_borough <- incidents_by_borough %>%
+  mutate(Percentage = round(Total_Incidents / sum(Total_Incidents) * 100, 1))
+
+# Create a clean table with grey header, including percentage column
+incidents_by_borough %>%
+  kable(col.names = c("Borough", "Total Emergency Incidents", "Percentage of All Incidents (%)"),
+        caption = "Distribution of Emergency Incidents by Borough") %>%
+  kable_styling(bootstrap_options = c("hover", "responsive"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#f2f2f2")
 ```
 
 ## Analysis 4: Trends 
@@ -97,17 +205,29 @@ incidents_by_month <- emergency_data %>%
   summarize(Total_Incidents = n(), .groups = "drop") %>%
   arrange(Month)
 
-print("Analysis 4: Trends in numbers of incidents over time (monthly)")
-print(incidents_by_month)
+# Format months for better display
+incidents_by_month <- incidents_by_month %>%
+  mutate(Month_Formatted = format(Month, "%b %Y"))
 
-# Creating a time series plot
+# Create a nice looking table
+incidents_by_month %>%
+  select(Month_Formatted, Total_Incidents) %>%
+  kable(col.names = c("Month", "Number of Emergency Incidents"),
+        caption = "Monthly Trend of Emergency Incidents") %>%
+  kable_styling(bootstrap_options = c("hover", "responsive"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#f2f2f2")
+
+# Creating an enhanced time series plot
 monthly_plot <- ggplot(incidents_by_month, aes(x = Month, y = Total_Incidents)) +
-  geom_line() +
-  geom_point() +
+  geom_line(size = 0.5) +
+  geom_point(size = 3) +
+  scale_color_nycc() +
   labs(title = "Monthly Emergency Incidents",
+       subtitle = "Trend Analysis of Emergency Notifications",
        x = "Month",
        y = "Number of Incidents") +
-  theme_nycc()
+  theme_nycc() 
 
 print(monthly_plot)
 ```
@@ -122,19 +242,33 @@ incidents_by_month_borough <- emergency_data %>%
   summarize(Total_Incidents = n(), .groups = "drop") %>%
   arrange(Month, Borough)
 
-print("Analysis: Trends in numbers of incidents over time by borough (monthly)")
-print(incidents_by_month_borough)
+# Format months for better display
+incidents_by_month_borough <- incidents_by_month_borough %>%
+  mutate(Month_Formatted = format(Month, "%b %Y"))
 
-# Creating a time series plot with lines for each borough
-monthly_borough_plot <- ggplot(incidents_by_month_borough, aes(x = Month, y = Total_Incidents, color = Borough)) +
-  geom_line() +
-  geom_point() +
+# Create a nice looking table
+incidents_by_month_borough %>%
+  select(Month_Formatted, Borough, Total_Incidents) %>%
+  tidyr::pivot_wider(names_from = Borough, values_from = Total_Incidents) %>%
+  kable(caption = "Monthly Emergency Incidents by Borough",
+        align = "c") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                full_width = TRUE) %>%
+  row_spec(0, bold = TRUE, background = "#f2f2f2")
+
+# Creating an enhanced time series plot with lines for each borough
+monthly_borough_plot <- ggplot(incidents_by_month_borough, 
+                              aes(x = Month, y = Total_Incidents, color = Borough)) +
+  geom_line(size = 0.5) +
+  geom_point(size = 1) +
+  scale_color_nycc() +
   labs(title = "Monthly Emergency Incidents by Borough",
+       subtitle = "Comparative Trend Analysis Across NYC Boroughs",
        x = "Month",
        y = "Number of Incidents",
        color = "Borough") +
-  theme_nycc() +
-  theme(legend.position = "bottom")
+  theme_nycc() 
+  
 
 print(monthly_borough_plot)
 ```
@@ -150,44 +284,28 @@ status_by_district <- emergency_data %>%
     Concluded_Incidents = sum(Status == "Concluded"),
     Percentage_Concluded = round(Concluded_Incidents / Total_Incidents * 100, 1),
     .groups = "drop"
-  ) %>%
-  arrange(Percentage_Concluded)
+  )
 
-print("Analysis 5: Percentage of concluded status incidents by council district")
-print(status_by_district)
-
-# Create a more comprehensive report
-summary_report <- function() {
-  cat("# Emergency Notifications Analysis Report\n\n")
-  
-  cat("## 1. Top Incident Types\n")
-  print(kable(incident_counts))
-  cat("\n\n")
-  
-  cat("## 2. Top 3 Incident Types by Council District\n")
-  print(kable(top_incidents_by_district))
-  cat("\n\n")
-  
-  cat("## 2.5 Total Incidents by Council District\n")
-  print(kable(incidents_by_district))
-  cat("\n\n")
-  
-  cat("## 3. Top 3 Incident Types by Borough\n")
-  print(kable(top_incidents_by_borough))
-  cat("\n\n")
-  
-  cat("## 3.5 Total Incidents by Borough\n")
-  print(kable(incidents_by_borough))
-  cat("\n\n")
-  
-  cat("## 4. Monthly Incident Trends\n")
-  print(kable(incidents_by_month))
-  cat("\n\n")
-  
-  cat("## 5. Concluded Incidents Percentage by Council District\n")
-  print(kable(status_by_district))
+# Create a custom sorting function for districts
+district_order <- function(x) {
+  # Convert district to character if it's not already
+  x <- as.character(x)
+  # Create a numeric value for sorting
+  ifelse(x == "All Districts", 100, # Put "All Districts" at the end
+         ifelse(grepl("^\\d+$", x), as.numeric(x), 99)) # Convert numeric districts to numbers, others to 99
 }
 
-# Run the summary report
-summary_report()
+# Sort the data by district using the custom function
+status_by_district <- status_by_district %>%
+  mutate(sort_order = district_order(Council_District)) %>%
+  arrange(sort_order) %>%
+  select(-sort_order)
+
+# Create a simple table with grey header only, consistent with 2.5 and 3.5
+status_by_district %>%
+  kable(col.names = c("Council District", "Total Incidents", "Concluded Incidents", "% Concluded"),
+        caption = "Resolution Status of Emergency Incidents by Council District") %>%
+  kable_styling(bootstrap_options = c("hover", "responsive"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#f2f2f2")
 ```

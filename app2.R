@@ -266,7 +266,7 @@ server <- function(input, output, session) {
     
     # Create the map
     leaflet(map_data) %>%
-      addCouncilStyle() %>%
+      addCouncilStyle(add_dists = TRUE, dist_year = "2023") %>%
       addProviderTiles(providers$CartoDB.Positron, group = "Basemap") %>%
       addPolygons(
         fillColor = ~pal(Total_Incidents),
@@ -293,7 +293,7 @@ server <- function(input, output, session) {
         title = glue::glue("Incidents ({ifelse(input$selected_year=='Overall', '23-24', input$selected_year)}, {str_trunc(input$selected_incident, 20)})"), # Shorten long incident names
         values = ~Total_Incidents,
         opacity = 0.8,
-        decreasing = FALSE,
+        decreasing = TRUE,
         labels = labels # Use the static labels matching the bins
       ) %>%
       addLayersControl(
