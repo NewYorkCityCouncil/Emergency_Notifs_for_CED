@@ -1,0 +1,193 @@
+## Load Data
+
+```{r}
+library(readxl)
+library(writexl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(lubridate)
+library(stringr)
+library(knitr)
+library(councilcount)
+library(councildown)
+library(councilverse)
+emergency_data <- read_excel("~/Documents/Emergency_Notifs_for_CED/data/output/emergency_data_cleaned.xlsx")
+```
+
+## Analysis 1: Top Incident Types
+
+```{r}
+# Arrange in descending order the most common Incidents
+incident_counts <- emergency_data %>%
+  count(Incident, sort = TRUE) %>%
+  rename(Count = n)
+
+print("Analysis 1: Top incident types")
+print(incident_counts)
+```
+
+## Analysis 2: Top 3 Incident Types by District
+
+```{r}
+# Arrange in descneding order top incident types by council district
+top_incidents_by_district <- emergency_data %>%
+  group_by(Council_District, Incident) %>%
+  summarize(Count = n(), .groups = "drop") %>%
+  group_by(Council_District) %>%
+  arrange(desc(Count)) %>%
+  slice_head(n = 3) %>%
+  ungroup() %>%
+  arrange(Council_District)
+
+print("Analysis 2: Top 3 incident types by council district")
+print(top_incidents_by_district)
+```
+
+## Analysis 2.5: Total Incidents by District
+
+```{r}
+# Count total incidents by district
+incidents_by_district <- emergency_data %>%
+  group_by(Council_District) %>%
+  summarize(Total_Incidents = n(), .groups = "drop") %>%
+  arrange(desc(Total_Incidents))
+
+print("Analysis 2.5: Total number of incidents by council district")
+print(incidents_by_district)
+```
+
+## Analysis 3: Top 3 Incident Types by Borough
+
+```{r}
+# Arrange in descneding order top incident types by borough
+top_incidents_by_borough <- emergency_data %>%
+  group_by(Borough, Incident) %>%
+  summarize(Count = n(), .groups = "drop") %>%
+  group_by(Borough) %>%
+  arrange(desc(Count)) %>%
+  slice_head(n = 3) %>%
+  ungroup() %>%
+  arrange(Borough)
+
+print("Analysis 3: Top 3 incident types by borough")
+print(top_incidents_by_borough)
+```
+
+## Analysis 3.5: Total Incidents by Borough
+
+```{r}
+# Count total incidents by borough
+incidents_by_borough <- emergency_data %>%
+  group_by(Borough) %>%
+  summarize(Total_Incidents = n(), .groups = "drop") %>%
+  arrange(desc(Total_Incidents))
+
+print("Analysis 3.5: Total number of incidents by borough")
+print(incidents_by_borough)
+```
+
+## Analysis 4: Trends 
+
+```{r}
+# Incidents per month 
+incidents_by_month <- emergency_data %>%
+  mutate(Month = floor_date(Date_of_Incident, "month")) %>%
+  group_by(Month) %>%
+  summarize(Total_Incidents = n(), .groups = "drop") %>%
+  arrange(Month)
+
+print("Analysis 4: Trends in numbers of incidents over time (monthly)")
+print(incidents_by_month)
+
+# Creating a time series plot
+monthly_plot <- ggplot(incidents_by_month, aes(x = Month, y = Total_Incidents)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Monthly Emergency Incidents",
+       x = "Month",
+       y = "Number of Incidents") +
+  theme_nycc()
+
+print(monthly_plot)
+```
+
+## Analysis 4.5: Trends by Borough
+
+```{r}
+# Incidents per month by borough
+incidents_by_month_borough <- emergency_data %>%
+  mutate(Month = floor_date(Date_of_Incident, "month")) %>%
+  group_by(Month, Borough) %>%
+  summarize(Total_Incidents = n(), .groups = "drop") %>%
+  arrange(Month, Borough)
+
+print("Analysis: Trends in numbers of incidents over time by borough (monthly)")
+print(incidents_by_month_borough)
+
+# Creating a time series plot with lines for each borough
+monthly_borough_plot <- ggplot(incidents_by_month_borough, aes(x = Month, y = Total_Incidents, color = Borough)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Monthly Emergency Incidents by Borough",
+       x = "Month",
+       y = "Number of Incidents",
+       color = "Borough") +
+  theme_nycc() +
+  theme(legend.position = "bottom")
+
+print(monthly_borough_plot)
+```
+
+## Analysis 5: Percentage of Concluded Reports by District
+
+```{r}
+# Percentage of concluded status incidents by council district
+status_by_district <- emergency_data %>%
+  group_by(Council_District) %>%
+  summarize(
+    Total_Incidents = n(),
+    Concluded_Incidents = sum(Status == "Concluded"),
+    Percentage_Concluded = round(Concluded_Incidents / Total_Incidents * 100, 1),
+    .groups = "drop"
+  ) %>%
+  arrange(Percentage_Concluded)
+
+print("Analysis 5: Percentage of concluded status incidents by council district")
+print(status_by_district)
+
+# Create a more comprehensive report
+summary_report <- function() {
+  cat("# Emergency Notifications Analysis Report\n\n")
+  
+  cat("## 1. Top Incident Types\n")
+  print(kable(incident_counts))
+  cat("\n\n")
+  
+  cat("## 2. Top 3 Incident Types by Council District\n")
+  print(kable(top_incidents_by_district))
+  cat("\n\n")
+  
+  cat("## 2.5 Total Incidents by Council District\n")
+  print(kable(incidents_by_district))
+  cat("\n\n")
+  
+  cat("## 3. Top 3 Incident Types by Borough\n")
+  print(kable(top_incidents_by_borough))
+  cat("\n\n")
+  
+  cat("## 3.5 Total Incidents by Borough\n")
+  print(kable(incidents_by_borough))
+  cat("\n\n")
+  
+  cat("## 4. Monthly Incident Trends\n")
+  print(kable(incidents_by_month))
+  cat("\n\n")
+  
+  cat("## 5. Concluded Incidents Percentage by Council District\n")
+  print(kable(status_by_district))
+}
+
+# Run the summary report
+summary_report()
+```

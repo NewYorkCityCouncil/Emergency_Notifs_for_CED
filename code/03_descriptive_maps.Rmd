@@ -1,0 +1,357 @@
+## Libraries
+
+```{r}
+library(readxl)
+library(writexl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(lubridate)
+library(stringr)
+library(knitr)
+library(sf)
+library(leaflet)
+library(htmltools)
+library(htmlwidgets)
+library(councilcount)
+library(councildown)
+library(councilverse)
+```
+
+## Interactive NYC Council Districts Map with Emergency Data
+
+### Step 1
+
+```{r}
+# Step 1: Read the emergency data
+emergency_data <- read_excel("~/Documents/Emergency_Notifs_for_CED/data/output/emergency_data_cleaned.xlsx")
+# Filter Out ALL CMs category and make sure it's numeric
+emergency_data <- emergency_data %>%
+  filter(Council_District != "All Districts") 
+```
+
+### Step 2
+
+```{r}
+# Step 2: Download NYC Council Districts boundaries
+# Using the confirmed working URL for NYC Council Districts GeoJSON
+nyc_districts_url <- "https://services5.arcgis.com/GfwWNkhOj9bNBqoJ/arcgis/rest/services/NYC_City_Council_Districts/FeatureServer/0/query?where=1=1&outFields=*&outSR=4326&f=geojson"
+temp_geojson <- tempfile(fileext = ".geojson")
+download.file(nyc_districts_url, temp_geojson, mode = "wb", quiet = TRUE)
+
+# Read the GeoJSON file
+nyc_districts <- st_read(temp_geojson)
+```
+
+### Step 3
+
+```{r}
+# Step 3: Process emergency data to get summaries by year, district, and incident type
+# Add year column to emergency data
+emergency_data <- emergency_data %>%
+  mutate(Year = year(Date_of_Incident))
+
+# Filter for 2023 and 2024 data only
+emergency_data <- emergency_data %>%
+  filter(Year %in% c(2023, 2024))
+
+# Calculate total incidents by district and year
+district_year_summary <- emergency_data %>%
+  group_by(Council_District, Year) %>%
+  summarize(Total_Incidents = n(), .groups = "drop") %>%
+  arrange(Council_District, Year)
+
+# Get top 3 incident types by district
+top_incidents_by_district <- emergency_data %>%
+  group_by(Council_District, Incident) %>%
+  summarize(Count = n(), .groups = "drop") %>%
+  group_by(Council_District) %>%
+  arrange(Council_District, desc(Count)) %>%
+  slice_head(n = 3) %>%
+  ungroup()
+
+# Get council member names by district (taking the latest value)
+council_members <- emergency_data %>%
+  group_by(Council_District) %>%
+  slice_tail(n = 1) %>%
+  select(Council_District, Council_Member) %>%
+  ungroup()
+```
+
+### Step 4
+
+```{r}
+# Step 4: Merge the data with the district boundaries
+# Ensure all district IDs are characters for consistency
+district_year_summary$Council_District <- as.character(district_year_summary$Council_District)
+top_incidents_by_district$Council_District <- as.character(top_incidents_by_district$Council_District)
+council_members$Council_District <- as.character(council_members$Council_District)
+
+# Print data to verify structure and content
+print("Council districts in emergency data:")
+print(unique(district_year_summary$Council_District))
+
+print("Council districts in boundaries data:")
+print(unique(nyc_districts$CounDist))
+
+# Create a wide format of district year summary (for easier joining)
+district_year_wide <- district_year_summary %>%
+  pivot_wider(
+    names_from = Year,
+    values_from = Total_Incidents,
+    names_prefix = "Incidents_"
+  )
+
+# Get top incidents in a format easier to use in popups
+top_incidents_formatted <- top_incidents_by_district %>%
+  group_by(Council_District) %>%
+  summarize(
+    TopIncidents = paste(
+      paste0(Incident, " (", Count, ")"),
+      collapse = ", "
+    ),
+    .groups = "drop"
+  )
+
+# Add district data to the NYC districts spatial object
+# Create a new spatial dataframe with all the information
+nyc_map_data <- nyc_districts %>%
+  mutate(district_id = as.character(CounDist)) %>%
+  left_join(district_year_wide, by = c("district_id" = "Council_District")) %>%
+  left_join(council_members, by = c("district_id" = "Council_District")) %>%
+  left_join(top_incidents_formatted, by = c("district_id" = "Council_District"))
+
+# Print to check if the join worked correctly
+print("Number of districts with data:")
+print(sum(!is.na(nyc_map_data$Incidents_2023) | !is.na(nyc_map_data$Incidents_2024)))
+
+# Calculate total incidents for coloring (2023+2024)
+nyc_map_data <- nyc_map_data %>%
+  mutate(
+    Incidents_2023 = ifelse(is.na(Incidents_2023), 0, Incidents_2023),
+    Incidents_2024 = ifelse(is.na(Incidents_2024), 0, Incidents_2024),
+    Total_Incidents = Incidents_2023 + Incidents_2024
+  )
+```
+
+### Step 5
+
+```{r}
+# Step 5: Create the leaflet map
+# Create color palette for the map
+# Define breaks for the legend according to user specifications
+bins <- c(0, 20, 40, 60, 80, 100, Inf)  # Custom bins: 0-20, 21-40, 41-60, 61-80, 81-100, 100+
+pal <- colorBin("YlOrRd", domain = nyc_map_data$Total_Incidents, bins = bins)
+
+# Create labels for the legend that match the bins
+labels <- c("0-20", "21-40", "41-60", "61-80", "81-100", "100+")
+
+# Create popup content directly within the map creation
+council_map <- leaflet(nyc_map_data) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(
+    fillColor = ~pal(Total_Incidents),
+    weight = 2,
+    opacity = 1,
+    color = "white",
+    dashArray = "3",
+    fillOpacity = 0.7,
+    highlightOptions = highlightOptions(
+      weight = 5,
+      color = "#666",
+      dashArray = "",
+      fillOpacity = 0.7,
+      bringToFront = TRUE
+    ),
+    # Create popup content directly for each district
+    popup = ~paste(
+      "<h4>Council District ", district_id, "</h4>",
+      "<p><b>Council Member:</b> ", ifelse(is.na(Council_Member), "Unknown", Council_Member), "</p>",
+      "<p><b>Total Incidents:</b></p>",
+      "<ul>",
+      "<li>2023: ", Incidents_2023, "</li>",
+      "<li>2024: ", Incidents_2024, "</li>",
+      "<li><b>Total: ", Total_Incidents, "</b></li>",
+      "</ul>",
+      "<p><b>Top 3 Incident Types:</b></p>",
+      "<ol>",
+      # Get top 3 incidents for this district from top_incidents_by_district
+      sapply(district_id, function(d) {
+        incidents <- top_incidents_by_district %>% 
+          filter(Council_District == d) %>% 
+          arrange(desc(Count)) %>%
+          slice_head(n = 3)
+        
+        if(nrow(incidents) > 0) {
+          paste(
+            paste0(
+              "<li>", 
+              incidents$Incident, 
+              " (", 
+              incidents$Count, 
+              ")</li>"
+            ),
+            collapse = ""
+          )
+        } else {
+          "<li>No incidents recorded</li>"
+        }
+      }),
+      "</ol>"
+    ),
+    label = ~paste0("District ", district_id)
+  ) %>%
+  # Add a fixed legend with matching colors and labels
+  addLegend(
+    "bottomright",
+    title = "Total Incidents (2023-2024)",
+    colors = colorBin("YlOrRd", domain = c(0, 100), bins = bins)(c(10, 30, 50, 70, 90, 120)),
+    labels = labels,
+    opacity = 0.7
+  )
+
+# Display the map
+council_map
+```
+
+### Step 5: NYCC Version
+
+```{r}
+# Step 5: Create the leaflet map with councildown styling
+# Use councildown's colorBin function for the map color palette
+# Define breaks for the legend according to user specifications
+bins <- c(0, 20, 40, 60, 80, 100, Inf)  # Custom bins: 0-20, 21-40, 41-60, 61-80, 81-100, 100+
+# Replace the standard colorBin with councildown's version
+pal <- councildown::colorBin(
+  palette = "nycc_blue",  # Use councildown's "cool" palette or another palette they provide
+  domain = nyc_map_data$Total_Incidents,
+  bins = bins,
+  na.color = "#FFFFFF",
+  right = FALSE
+)
+# Create labels for the legend that match the bins
+labels <- c("0-20", "21-40", "41-60", "61-80", "81-100", "100+")
+# Create the map with councildown theming
+council_map <- leaflet(nyc_map_data) %>%
+  # You can use councildown tile providers if they're provided
+  # Otherwise keep your current tile provider
+  addCouncilStyle() %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(
+    fillColor = ~pal(Total_Incidents),
+    weight = 2,
+    opacity = 2,
+    color = "white",
+    dashArray = "3",
+    fillOpacity = 0.7,
+    highlightOptions = highlightOptions(
+      weight = 5,
+      color = "#666",
+      dashArray = "",
+      fillOpacity = 0.7,
+      bringToFront = TRUE
+    ),
+    # Use councilPopup to create styled popups according to council standards
+    label = ~paste0("District ", district_id),
+    popup = ~lapply(councildown::councilPopup(
+      paste0(
+        "<h4>Council District ", district_id, "</h4>",
+        "<p><b>Council Member:</b> ", ifelse(is.na(Council_Member), "Unknown", Council_Member), "</p>",
+        "<p><b>Total Incidents:</b></p>",
+        "<ul>",
+        "<li>2023: ", Incidents_2023, "</li>",
+        "<li>2024: ", Incidents_2024, "</li>",
+        "<li><b>Total: ", Total_Incidents, "</b></li>",
+        "</ul>",
+        "<p><b>Top 3 Incident Types:</b></p>",
+        "<ol>",
+        # Get top 3 incidents for this district from top_incidents_by_district
+        sapply(district_id, function(d) {
+          incidents <- top_incidents_by_district %>% 
+            filter(Council_District == d) %>% 
+            arrange(desc(Count)) %>%
+            slice_head(n = 3)
+          
+          if(nrow(incidents) > 0) {
+            paste(
+              paste0(
+                "<li>", 
+                incidents$Incident, 
+                " (", 
+                incidents$Count, 
+                ")</li>"
+              ),
+              collapse = ""
+            )
+          } else {
+            "<li>No incidents recorded</li>"
+          }
+        }),
+        "</ol>"
+      )
+    ), htmltools::HTML)
+  ) %>%
+  # Replace standard addLegend with councildown's addLegend_decreasing
+  councildown::addLegend_decreasing(
+    position = "topleft",
+    pal = pal,
+    title = "Total Incidents (2023-2024)",
+    values = nyc_map_data$Total_Incidents,
+    opacity = 0.7,
+    decreasing = TRUE,  # Keep the same order as your original legend
+    labels = labels
+  ) %>%
+  # Add source text attribution to the map
+  councildown::addSourceText(
+    # Need coordinates within NYC bounds - these are approximate
+    lng = -74.0,     # Approximate longitude for NYC
+    lat = 40.65,     # Approximate latitude for NYC
+    "Source: NYCC Data Team"
+  )
+# Display the map
+council_map
+
+# Add Districts
+map_w_dists <- council_map %>%
+  councildown::addCouncilStyle(add_dists = TRUE, dist_year = "2023")
+map_w_dists
+```
+
+### Step 6
+
+```{r}
+# Save the map as static png 
+# Use councilverse::file_name_generator to create standardized name for file
+map_png <- councilverse::file_name_generator(description = "council_district_emergency_notifications", date_year = 2024, file_extension = ".png")
+
+# Save the map using councildown::mapshot default zoom, vwidth, vheight, remove_controls
+councildown::mapshot(map_w_dists, file = glue::glue("~/Documents/Emergency_Notifs_for_CED/visuals/{map_png}"))
+
+# Save the map as html
+map_html <- councilverse::file_name_generator(description = "council_district_emergency_notifications", date_year = 2024, file_extension = ".html")
+
+# Save leaflet html (this function is not a part of councilverse)
+htmlwidgets::saveWidget(map_w_dists, file=glue::glue("~/Documents/Emergency_Notifs_for_CED/visuals/{map_html}"), selfcontained = T)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
