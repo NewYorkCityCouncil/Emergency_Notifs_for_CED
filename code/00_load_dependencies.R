@@ -5,7 +5,7 @@
 #' IF YOU DO NOT WANT TO INSTALL ANY OF THESE PACKAGES, DO NOT RUN THIS CODE.
 list.of.packages <- c("shiny", "readxl", "writexl", "dplyr", "tidyr", "ggplot2", 
                       "lubridate", "stringr", "knitr", "kableExtra", "sf", "leaflet", 
-                      "htmltools", "htmlwidgets", "glue")
+                      "htmltools", "htmlwidgets", "Kendall", "glue")
 # checks if packages has been previously installed
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
 councildown.check <- "councildown" %in% installed.packages()[,"Package"]

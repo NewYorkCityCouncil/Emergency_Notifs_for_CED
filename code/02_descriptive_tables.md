@@ -1,7 +1,7 @@
 ---
 title: "Emergency Notifications for CED"
 author: "Danylo Orlov, NYCC Data Team"
-date: "April 08, 2025"
+date: "April 09, 2025"
 output:
   html_document:
     toc: true
@@ -41,6 +41,7 @@ library(ggplot2)
 library(lubridate)
 library(stringr)
 library(knitr)
+library(Kendall)
 library(kableExtra)
 library(councilcount)
 library(councildown)
@@ -119,6 +120,7 @@ incident_counts %>%
 </table>
 
 ## Analysis 2: Top 3 Incident Types by District
+### NOTE: "All Districts" refers to emergencies submitted to all Council Members.
 
 
 ``` r
@@ -1205,6 +1207,7 @@ incidents_by_district %>%
 </table>
 
 ## Analysis 3: Top 3 Incident Types by Borough
+### NOTE: "All Boroughs" refers to emergencies submitted to all Council Members.
 
 
 ``` r
@@ -1539,20 +1542,33 @@ incidents_by_month %>%
 </table>
 
 ``` r
-# Creating an enhanced time series plot
+# Perform the Mann-Kendall test
+mk_test <- MannKendall(incidents_by_month$Total_Incidents)
+mk_p_value <- round(mk_test$sl[1], 4)  # p-value of the test
+mk_tau <- round(mk_test$tau[1], 4)     # Kendall's tau statistic
+
+# Determine trend direction and significance
+trend_text <- ifelse(mk_p_value <= 0.05,
+                     ifelse(mk_tau > 0, "Significant Increasing Trend", "Significant Decreasing Trend"),
+                     "No Significant Trend")
+
+# Make the plot
 nycc_palette <- pal_nycc()
 monthly_plot <- ggplot(incidents_by_month, aes(x = Month, y = Total_Incidents)) +
   geom_line(size = 0.5, color = nycc_palette[2]) +
   geom_point(size = 2, color = nycc_palette[2]) +
+  # Add a smoother to highlight the trend visually
+  geom_smooth(method = "loess", se = FALSE, linetype = "dashed", color = nycc_palette[4]) +
   labs(title = "Monthly Emergency Incidents",
-       subtitle = "Trend Analysis of Emergency Notifications",
+       subtitle = paste0("Trend Analysis of Emergency Notifications\n",
+                        "Mann-Kendall Test: ", trend_text, 
+                        " (tau = ", mk_tau, ", p-value = ", mk_p_value, ")"),
        x = "Month",
        y = "Number of Incidents") +
   theme_nycc() +
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1)
   )
-
 print(monthly_plot)
 ```
 
@@ -1818,26 +1834,54 @@ incidents_by_month_borough %>%
 </table>
 
 ``` r
-# Creating an enhanced time series plot with lines for each borough
-monthly_borough_plot <- ggplot(incidents_by_month_borough, 
-                              aes(x = Month, y = Total_Incidents, color = Borough)) +
-  geom_line(size = 0.5) +
-  geom_point(size = 1) +
-  scale_color_nycc() +
-  labs(title = "Monthly Emergency Incidents by Borough",
-       subtitle = "Comparative Trend Analysis Across NYC Boroughs",
-       x = "Month",
-       y = "Number of Incidents",
-       color = "Borough") +
-  theme_nycc() +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1)
-  )
+# Get the list of unique boroughs
+boroughs <- unique(incidents_by_month_borough$Borough)
+
+# Create a list to store the plots
+borough_plots <- list()
+
+# Create individual plots for each borough with Mann-Kendall test
+for (borough in boroughs) {
+  # Filter data for the current borough
+  borough_data <- incidents_by_month_borough %>%
+    filter(Borough == borough)
   
-print(monthly_borough_plot)
+  # Perform the Mann-Kendall test
+  mk_test <- MannKendall(borough_data$Total_Incidents)
+  mk_p_value <- round(mk_test$sl[1], 4)  # p-value of the test
+  mk_tau <- round(mk_test$tau[1], 4)     # Kendall's tau statistic
+  
+  # Determine trend direction and significance
+  trend_text <- ifelse(mk_p_value <= 0.05,
+                       ifelse(mk_tau > 0, "Significant Increasing Trend", "Significant Decreasing Trend"),
+                       "No Significant Trend")
+  
+  # Create the plot for this borough
+  borough_plot <- ggplot(borough_data, aes(x = Month, y = Total_Incidents)) +
+    geom_line(size = 0.5, color = nycc_palette[which(boroughs == borough)]) +
+    geom_point(size = 2, color = nycc_palette[which(boroughs == borough)]) +
+    # Add a smoother to highlight the trend visually
+    geom_smooth(method = "loess", se = FALSE, linetype = "dashed", color = nycc_palette[4]) +
+    labs(title = paste0(borough, " Emergency Incidents"),
+         subtitle = paste0("Trend Analysis of Emergency Notifications\n",
+                          "Mann-Kendall Test: ", trend_text, 
+                          " (tau = ", mk_tau, ", p-value = ", mk_p_value, ")"),
+         x = "Month",
+         y = "Number of Incidents") +
+    #theme_nycc() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+  
+  # Store the plot in our list
+  borough_plots[[borough]] <- borough_plot
+  
+  # Print the plot
+  print(borough_plot)
+}
 ```
 
-![](figures/unnamed-chunk-10-1.png)<!-- -->
+![](figures/unnamed-chunk-10-1.png)<!-- -->![](figures/unnamed-chunk-10-2.png)<!-- -->![](figures/unnamed-chunk-10-3.png)<!-- -->![](figures/unnamed-chunk-10-4.png)<!-- -->![](figures/unnamed-chunk-10-5.png)<!-- -->![](figures/unnamed-chunk-10-6.png)<!-- -->
 
 ## Analysis 5: Percentage of Concluded Reports by District
 
