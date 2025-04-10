@@ -1,0 +1,10 @@
+name: Publish Document
+title:
+username:
+account: rpubs
+server: rpubs.com
+hostUrl: rpubs.com
+appId: https://api.rpubs.com/api/v1/document/1295474/bbb2a1ee6a0c44c19686463dd8b8af6c
+bundleId: https://api.rpubs.com/api/v1/document/1295474/bbb2a1ee6a0c44c19686463dd8b8af6c
+url: http://rpubs.com/dorlov99/1295474
+version: 1

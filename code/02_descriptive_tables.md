@@ -1,7 +1,7 @@
 ---
 title: "Emergency Notifications for CED"
 author: "Danylo Orlov, NYCC Data Team"
-date: "April 09, 2025"
+date: "April 10, 2025"
 output:
   html_document:
     toc: true
@@ -148,14 +148,14 @@ top_incidents_by_district <- top_incidents_by_district %>%
   arrange(sort_order) %>%
   select(-sort_order)
 
-# Create a nice looking table without group_rows which is causing the error
+# Create a nice looking table 
 top_incidents_by_district %>%
   kable(col.names = c("Council District", "Incident Type", "Frequency"),
         caption = "Top 3 Emergency Incident Types by Council District") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
                 full_width = FALSE) %>%
   row_spec(0, bold = TRUE, background = "#f2f2f2") %>%
-  # Add alternating background color for different districts
+  # Add alternating background color 
   row_spec(which(duplicated(top_incidents_by_district$Council_District) == FALSE), 
            extra_css = "border-top: 2px solid #666;") %>%
   footnote(general = "Note: Only top 3 incidents shown per district", 
@@ -977,7 +977,7 @@ incidents_by_district <- incidents_by_district %>%
   arrange(sort_order) %>%
   select(-sort_order)
 
-# Create a nice looking table with minimal styling
+# Create a nice looking table 
 incidents_by_district %>%
   kable(col.names = c("Council District", "Total Emergency Incidents"),
         caption = "Total Number of Emergency Incidents by Council District") %>%
@@ -1221,14 +1221,14 @@ top_incidents_by_borough <- emergency_data %>%
   ungroup() %>%
   arrange(Borough)
 
-# Create a nice looking table without group_rows which is causing the error
+# Create a nice looking table 
 top_incidents_by_borough %>%
   kable(col.names = c("Borough", "Incident Type", "Frequency"),
         caption = "Top 3 Emergency Incident Types by Borough") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
                 full_width = FALSE) %>%
   row_spec(0, bold = TRUE, background = "#f2f2f2") %>%
-  # Add alternating background color for different boroughs
+  # Add alternating background color 
   row_spec(which(duplicated(top_incidents_by_borough$Borough) == FALSE), 
            extra_css = "border-top: 2px solid #666;") %>%
   column_spec(3, bold = TRUE) %>%
@@ -1868,12 +1868,12 @@ for (borough in boroughs) {
                           " (tau = ", mk_tau, ", p-value = ", mk_p_value, ")"),
          x = "Month",
          y = "Number of Incidents") +
-    #theme_nycc() +
+    theme_nycc() +
     theme(
       axis.text.x = element_text(angle = 45, hjust = 1)
     )
   
-  # Store the plot in our list
+  # Store the plot in list
   borough_plots[[borough]] <- borough_plot
   
   # Print the plot
