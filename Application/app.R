@@ -105,16 +105,9 @@ ui <- fluidPage(
       html, body {height: 100%; margin: 0; padding: 0;}
       .container-fluid {height: 100%; padding: 0;} /* Make fluidPage container take full height */
       #councilMap {height: 100vh !important;} /* Force map to take full viewport height */
-
-      /* Optional: Style the text within the transparent panel for better readability */
-      #controls h3, #controls h4, #controls label {
-         /* text-shadow: 1px 1px 2px white, -1px -1px 2px white, 1px -1px 2px white, -1px 1px 2px white; */ /* Example: White outline */
-         /* color: black; */ /* Ensure text color contrasts with map */
-      }
        #controls h3 {
-        /* font-weight: bold; */
+        margin-top: 0; /* Reduce margin above title */
        }
-
     "))
   ),
   
@@ -130,9 +123,10 @@ ui <- fluidPage(
     left = 20,
     right = "auto",
     bottom = "auto",
-    width = 220,
+    # CHANGED: Increased panel width
+    width = 280, # <--- WIDTH INCREASED HERE
     height = "auto",
-    style = "z-index: 1000;", # Ensures controls stay on top
+    style = "background-color: rgba(255, 255, 255, 0.5); padding: 10px; border-radius: 5px; z-index: 1000;",
     
     h3("Interactive Emergency Incidents Map"),
     h4("Filter Options"),
@@ -234,14 +228,14 @@ server <- function(input, output, session) {
     req(nrow(map_data) > 0)
     
     bins <- c(0, 5, 10, 20, 40, 60, Inf)
-    labels <- c("0 - 5", "5 - 10", "10 - 20", "20 - 40", "40 - 60", "60 - Inf") # Match screenshot format
+    labels <- c("0 - 5", "5 - 10", "10 - 20", "20 - 40", "40 - 60", "60 - Inf")
     
     max_incidents <- max(map_data$Total_Incidents, na.rm = TRUE)
     palette_domain <- if (max_incidents > 0) map_data$Total_Incidents else c(0, 1)
     
     pal <- councildown::colorBin(
       palette = "nycc_blue", domain = palette_domain, bins = bins,
-      na.color = "#E0E0E0", # Slightly grey NA color might look better than pure white
+      na.color = "#E0E0E0",
       right = FALSE
     )
     
@@ -259,8 +253,6 @@ server <- function(input, output, session) {
       councilPopup(paste0(popup_title, popup_body))
     })
     
-    # Create the map
-    # CHANGED: Added attributionControl = FALSE
     leaflet(map_data, options = leafletOptions(zoomControl = FALSE, attributionControl = FALSE)) %>%
       addCouncilStyle(add_dists = TRUE, dist_year = "2023") %>%
       addProviderTiles(providers$CartoDB.Positron, group = "Basemap") %>%
@@ -277,7 +269,6 @@ server <- function(input, output, session) {
         position = "bottomright", pal = pal,
         title = glue::glue("Incidents ({ifelse(input$selected_year=='Overall', '23-24', input$selected_year)}, {str_trunc(input$selected_incident, 20)})"),
         values = ~Total_Incidents, opacity = 0.8, decreasing = TRUE,
-        # Use custom labFormat to ensure labels match desired format
         labFormat = function(type, cuts, p) { labels }
       ) %>%
       htmlwidgets::onRender("
@@ -291,9 +282,6 @@ server <- function(input, output, session) {
         baseGroups = c("Basemap"), overlayGroups = c("Districts"),
         options = layersControlOptions(collapsed = TRUE, position = "bottomleft")
       )
-    # REMOVED: addControl(html="...", position="bottomright") line was deleted
-    # Optional: Re-add source text if desired and not overlapping
-    # %>% addSourceText(...)
     
   }) # End renderLeaflet
   
