@@ -18,274 +18,294 @@ library(glue)
 library(councilcount)
 library(councildown)
 library(councilverse)
-library(shiny) # Make sure shiny is loaded
+library(shiny)
+library(shinyjs) # Make sure shinyjs is loaded
 
 # --- 1. Initial Data Loading and Basic Prep (Run Once) ---
-
-# IMPORTANT: Path to your data file
+# (Keep this section exactly as in the previous correct version)
+# ... (load emergency data, check required cols, clean, filter) ...
 emergency_data_file <- "emergency_data_cleaned.xlsx"
-
-if (!file.exists(emergency_data_file)) {
-  stop(glue::glue("Error: Data file not found at '{emergency_data_file}'.
-       Please place the file in the app directory or update the path."))
-}
-
-# Read the raw emergency data
+if (!file.exists(emergency_data_file)) { stop(glue::glue("Error: Data file not found at '{emergency_data_file}'. Please place the file in the app directory or update the path.")) }
 emergency_data_raw <- read_excel(emergency_data_file)
-
-# Basic cleaning and add Year column
+required_cols <- c("Council_District", "Date_of_Incident", "Incident", "Status", "Council_Member", "Borough")
+if (!all(required_cols %in% names(emergency_data_raw))) { stop(glue::glue("Error: Missing one or more required columns. Need: {paste(required_cols, collapse=', ')}")) }
 emergency_data <- emergency_data_raw %>%
-  filter(Council_District != "All Districts") %>%
-  mutate(
-    Council_District = as.character(Council_District),
-    Year = year(Date_of_Incident),
-    # Ensure Incident is character and handle potential NAs/empty strings
-    Incident = as.character(Incident),
-    Incident = ifelse(is.na(Incident) | Incident == "", "Unknown", Incident)
-  ) %>%
-  filter(Year %in% c(2023, 2024)) # Keep only relevant years initially
-
-# Get unique incident types for the dropdown, adding "All Incidents"
+  mutate( Status = as.character(Status), Status = ifelse(is.na(Status) | Status == "", "Unknown", Status), Council_District = as.character(Council_District), Council_Member = as.character(Council_Member), Borough = as.character(Borough), Borough = ifelse(is.na(Borough) | Borough == "", "Unknown", toupper(Borough)), Incident = as.character(Incident), Incident = ifelse(is.na(Incident) | Incident == "", "Unknown", Incident), Year = year(Date_of_Incident) ) %>% filter(Council_District != "All Districts") %>% filter(Year %in% c(2023, 2024))
 incident_choices <- c("All Incidents", sort(unique(emergency_data$Incident)))
+# Define Status choices using actual values from data (plus "All")
+status_choices <- c("All Statuses", "Concluded", "Other", "Pending") # Assuming these are the exact values
 
-# Download NYC Council Districts boundaries (run once)
-nyc_districts_url <- "https://services5.arcgis.com/GfwWNkhOj9bNBqoJ/arcgis/rest/services/NYC_City_Council_Districts/FeatureServer/0/query?where=1=1&outFields=*&outSR=4326&f=geojson"
-temp_geojson <- tempfile(fileext = ".geojson")
-download_success <- FALSE
-nyc_districts_base <- NULL # Initialize to NULL
-
-tryCatch({
-  download.file(nyc_districts_url, temp_geojson, mode = "wb", quiet = TRUE)
-  nyc_districts_base <- st_read(temp_geojson) %>%
-    mutate(district_id = as.character(CounDist)) # Add district_id here
-  download_success <- TRUE
-}, error = function(e) {
-  message("Failed to download NYC Council Districts GeoJSON. Error: ", e$message)
-})
-
-if (!download_success && is.null(nyc_districts_base)) {
-  # Try reading a local file if download failed and base is still NULL
-  local_geojson_path <- "NYC_City_Council_Districts.geojson" # Example local file name
-  if(file.exists(local_geojson_path)) {
-    tryCatch({
-      nyc_districts_base <- st_read(local_geojson_path) %>%
-        mutate(district_id = as.character(CounDist))
-      message("Successfully loaded local GeoJSON backup.")
-      download_success <- TRUE # Treat as success for the app logic
-    }, error = function(e_local){
-      message("Failed to read local GeoJSON backup. Error: ", e_local$message)
-    })
-  }
-}
-
-# Final check if boundaries loaded
-if (is.null(nyc_districts_base)) {
-  stop("Could not load Council District boundaries (download failed and no local backup found/readable). App cannot continue.")
-}
-
-
-# Pre-calculate Council Member lookup (can be done once)
-# Take the most recent non-NA name per district within the 2023-2024 timeframe
-council_members_lookup <- emergency_data %>%
-  filter(!is.na(Council_Member) & Council_Member != "") %>%
-  arrange(Council_District, desc(Date_of_Incident)) %>%
-  group_by(Council_District) %>%
-  slice_head(n = 1) %>%
-  select(Council_District, Council_Member) %>%
-  ungroup() %>%
-  # Ensure character type for joining
-  mutate(Council_District = as.character(Council_District))
+# ... (load/check district boundaries -> nyc_districts_base) ...
+nyc_districts_url <- "https://services5.arcgis.com/GfwWNkhOj9bNBqoJ/arcgis/rest/services/NYC_City_Council_Districts/FeatureServer/0/query?where=1=1&outFields=*&outSR=4326&f=geojson"; temp_geojson_dist <- tempfile(fileext = ".geojson"); download_success_dist <- FALSE; nyc_districts_base <- NULL
+tryCatch({ message("Downloading Districts..."); download.file(nyc_districts_url, temp_geojson_dist, mode = "wb", quiet = TRUE); nyc_districts_base <- st_read(temp_geojson_dist) %>% mutate(district_id = as.character(CounDist)); download_success_dist <- TRUE; message("Districts downloaded."); }, error = function(e) { message("Failed download: ", e$message) })
+if (!download_success_dist) { local_geojson_path_dist <- "NYC_City_Council_Districts.geojson"; if(file.exists(local_geojson_path_dist)) { tryCatch({ nyc_districts_base <- st_read(local_geojson_path_dist) %>% mutate(district_id = as.character(CounDist)); message("Loaded local Districts backup."); download_success_dist <- TRUE }, error = function(e_local){ message("Failed local District load: ", e_local$message)}) } else { message("Local Districts file not found.") } }
+if (is.null(nyc_districts_base)) { stop("FATAL ERROR: Could not load Council District boundaries.") } else { message("--- Districts loaded. ---") }
+target_crs <- st_crs(nyc_districts_base); message(paste("Target CRS set to:", target_crs$input))
+# ... (load/check borough boundaries -> nyc_boroughs) ...
+borough_geojson_file <- "borough-boundaries.geojson"; nyc_boroughs <- NULL; message(glue::glue("Loading Boroughs from '{borough_geojson_file}'..."))
+if (file.exists(borough_geojson_file)) { tryCatch({ nyc_boroughs_raw <- st_read(borough_geojson_file); nyc_boroughs <- nyc_boroughs_raw %>% st_transform(crs = target_crs) %>% mutate( Borough = toupper(boro_name) ) %>% select(Borough, geometry); message("--- Boroughs loaded and transformed. ---"); print(paste("Borough CRS:", st_crs(nyc_boroughs)$input)) }, error = function(e) { message(glue::glue("ERROR loading Borough file: {e$message}")); nyc_boroughs <- NULL }) } else { message(glue::glue("WARNING: Borough file not found.")) }
+# ... (calculate council member lookup) ...
+council_members_lookup <- emergency_data %>% filter(!is.na(Council_Member) & Council_Member != "") %>% arrange(Council_District, desc(Date_of_Incident)) %>% group_by(Council_District) %>% slice_head(n = 1) %>% select(Council_District, Council_Member) %>% ungroup() %>% mutate(Council_District = as.character(Council_District)); message("Council Member lookup calculated.")
 
 
 # --- 2. UI Definition ---
 ui <- fluidPage(
-  # Add custom CSS
-  tags$head(
-    tags$style(HTML("
-      html, body {height: 100%; margin: 0; padding: 0;}
-      .container-fluid {height: 100%; padding: 0;} /* Make fluidPage container take full height */
-      #councilMap {height: 100vh !important;} /* Force map to take full viewport height */
-       #controls h3 {
-        margin-top: 0; /* Reduce margin above title */
-       }
-    "))
-  ),
-  
-  # Map Output - Make this fill the background
+  tags$head(tags$style(HTML("html, body {height: 100%; margin: 0; padding: 0;} .container-fluid {height: 100%; padding: 0;} #councilMap {height: 100vh !important;} #controls h3 { margin-top: 0; }"))),
   leafletOutput("councilMap", width="100%", height="100%"),
-  
-  # Absolute Panel for Controls (Overlays the Map)
   absolutePanel(
-    id = "controls",
-    fixed = TRUE,
-    draggable = TRUE,
-    top = 20,
-    left = 20,
-    right = "auto",
-    bottom = "auto",
-    # CHANGED: Increased panel width
-    width = 280, # <--- WIDTH INCREASED HERE
-    height = "auto",
-    style = "background-color: rgba(255, 255, 255, 0.5); padding: 10px; border-radius: 5px; z-index: 1000;",
+    id = "controls", fixed = TRUE, draggable = TRUE,
+    top = 20, left = 20, right = "auto", bottom = "auto",
+    width = 300,
+    style = "background-color: rgba(255, 255, 255, 0.6); padding: 15px; border-radius: 5px; z-index: 2000; max-height: 90vh;",
     
     h3("Interactive Emergency Incidents Map"),
+    shinyjs::useShinyjs(),
+    radioButtons("map_level", "Select Map Level:", choices = c("Districts", "Boroughs"), selected = "Districts"),
+    
     h4("Filter Options"),
-    
-    selectInput("selected_year", "Select Year:",
-                choices = c("Overall (2023-2024)" = "Overall", "2023", "2024"),
-                selected = "Overall"),
-    
-    selectInput("selected_incident", "Select Incident Type:",
-                choices = incident_choices,
-                selected = "All Incidents")
+    selectInput("selected_year", "Select Year:", choices = c("Overall (2023-2024)" = "Overall", "2023", "2024"), selected = "Overall"),
+    selectInput("selected_incident", "Select Incident Type:", choices = incident_choices, selected = "All Incidents"),
+    # <<< NEW: Status Filter >>>
+    selectInput("selected_status", "Select Incident Status:", choices = status_choices, selected = "All Statuses")
   )
 )
 
+
 # --- 3. Server Logic ---
 server <- function(input, output, session) {
+  message("--- Server started. ---")
+  
+  observe({ borough_data_loaded <- !is.null(nyc_boroughs) && inherits(nyc_boroughs, "sf") && nrow(nyc_boroughs) > 0; if (!borough_data_loaded) { shinyjs::disable(selector = "#map_level input[value='Boroughs']"); if(input$map_level == "Boroughs") updateRadioButtons(session, "map_level", selected = "Districts") } else { shinyjs::enable(selector = "#map_level input[value='Boroughs']") } })
   
   # --- Reactive Data Filtering ---
+  # <<< MODIFIED: Added Status Filter >>>
   filtered_emergency_data <- reactive({
-    req(input$selected_year, input$selected_incident)
+    req(input$selected_year, input$selected_incident, input$selected_status) # Add new input
     
-    filtered <- emergency_data
+    data_subset <- emergency_data
     
+    # Filter by Year
     if (input$selected_year != "Overall") {
-      filtered <- filtered %>% filter(Year == as.numeric(input$selected_year))
+      year_num <- as.numeric(input$selected_year); data_subset <- data_subset %>% filter(Year == year_num)
     }
-    
+    # Filter by Incident Type
     if (input$selected_incident != "All Incidents") {
-      filtered <- filtered %>% filter(Incident == input$selected_incident)
+      selected_inc <- input$selected_incident; data_subset <- data_subset %>% filter(Incident == selected_inc)
+    }
+    # Filter by Status (NEW)
+    if (input$selected_status != "All Statuses") {
+      selected_stat <- input$selected_status
+      message(glue::glue("Filtering by Status = {selected_stat}"))
+      data_subset <- data_subset %>% filter(Status == selected_stat)
+    } else {
+      message("Not filtering by Status (All Statuses selected).")
     }
     
-    if(nrow(filtered) == 0) {
-      return(tibble(
-        Council_District = character(), Incident = character(),
-        Council_Member = character(), Date_of_Incident = as.POSIXct(character()),
-        Year = integer()
-      ))
+    # Handle empty result
+    if (nrow(data_subset) == 0) {
+      final_filtered_data <- tibble( Council_District = character(), Incident = character(), Council_Member = character(), Date_of_Incident = Sys.time()[0], Year = integer(), Status = character(), Borough=character() )
+    } else {
+      final_filtered_data <- data_subset
     }
-    return(filtered)
+    message(glue("filtered_emergency_data rows: {nrow(final_filtered_data)}"))
+    return(final_filtered_data)
   })
   
   # --- Reactive Data Aggregation and Merging for Map ---
+  # <<< MODIFIED: Calculate Denominator Separately for Percentage >>>
   reactive_map_data <- reactive({
-    current_data <- filtered_emergency_data()
-    req(nyc_districts_base)
+    req(input$map_level)
+    level <- input$map_level
+    req(input$selected_year, input$selected_incident, input$selected_status) # Ensure all filters are available
     
-    if (nrow(current_data) == 0) {
-      map_data_agg <- nyc_districts_base %>%
-        mutate(
-          Total_Incidents = 0,
-          Council_Member = left_join(., council_members_lookup, by = c("district_id" = "Council_District"))$Council_Member,
-          Council_Member = ifelse(is.na(Council_Member), "Data Unavailable", Council_Member),
-          TopIncidentsHTML = "<p>No incidents match filter.</p>"
-        )
-      return(map_data_agg)
-    }
+    # Get data filtered by *ALL* selections (Year, Incident, Status, Geo)
+    fully_filtered_data <- filtered_emergency_data(); req(fully_filtered_data)
     
-    district_summary <- current_data %>%
-      group_by(Council_District) %>%
-      summarize(Total_Incidents = n(), .groups = "drop")
+    # --- Calculate Denominator Data ---
+    # Filter *only* by Year and Incident Type (NOT status yet)
+    partially_filtered_data <- emergency_data
+    if (input$selected_year != "Overall") { year_num <- as.numeric(input$selected_year); partially_filtered_data <- partially_filtered_data %>% filter(Year == year_num) }
+    if (input$selected_incident != "All Incidents") { selected_inc <- input$selected_incident; partially_filtered_data <- partially_filtered_data %>% filter(Incident == selected_inc) }
+    message(glue("Denominator calculation base rows: {nrow(partially_filtered_data)}"))
+    # --- End Denominator Data Prep ---
     
-    if (input$selected_incident == "All Incidents" && nrow(current_data) > 0) {
-      top_incidents_filtered <- current_data %>%
-        group_by(Council_District, Incident) %>%
-        summarize(Count = n(), .groups = "drop") %>% group_by(Council_District) %>%
-        arrange(Council_District, desc(Count)) %>% slice_head(n = 3) %>% ungroup()
-      top_incidents_html <- top_incidents_filtered %>%
+    message(glue::glue("Aggregating for: {level}"))
+    aggregated_data <- NULL; base_shapes <- NULL
+    
+    if (level == "Districts") {
+      base_shapes <- nyc_districts_base; req(base_shapes)
+      # Calculate Denominator Count by District
+      denominator_summary <- partially_filtered_data %>%
         group_by(Council_District) %>%
-        summarise(
-          TopIncidentsHTML = paste0("<ol>", paste0("<li>", htmlEscape(Incident), " (", Count, ")</li>", collapse = ""), "</ol>"),
-          .groups = "drop" )
-    } else if (nrow(current_data) > 0) {
-      top_incidents_html <- current_data %>%
-        group_by(Council_District) %>% summarise(Count = n(), .groups = "drop") %>%
-        mutate(TopIncidentsHTML = paste0("<p><b>Selected:</b> ", htmlEscape(input$selected_incident), " (", Count, ")</p>")) %>%
-        select(Council_District, TopIncidentsHTML)
-    } else {
-      top_incidents_html <- tibble(Council_District = character(), TopIncidentsHTML = character())
-    }
+        summarize(Denominator_Total = n(), .groups = "drop")
+      
+      if (nrow(fully_filtered_data) == 0) {
+        # Join denominator even if numerator is 0
+        aggregated_data <- base_shapes %>%
+          left_join(denominator_summary, by = c("district_id" = "Council_District")) %>%
+          left_join(council_members_lookup, by = c("district_id" = "Council_District")) %>%
+          mutate(
+            Level_ID = district_id, Level_Name = paste("District", district_id),
+            Council_Member_Name = ifelse(is.na(Council_Member), "Unavailable", Council_Member),
+            Total_Incidents = 0, # This IS the numerator
+            Denominator_Total = ifelse(is.na(Denominator_Total), 0, Denominator_Total),
+            Percent_Selected_Status = 0, # Numerator is 0
+            TopIncidentsHTML = "<p>None</p>" )
+      } else {
+        # Calculate Numerator Counts (these are the Total_Incidents for the fully filtered set)
+        district_summary <- fully_filtered_data %>% group_by(Council_District) %>% summarize(Total_Incidents = n(), .groups = "drop")
+        # Top 3 Incidents HTML (based on fully filtered data)
+        if (input$selected_incident == "All Incidents") { if (!"Incident" %in% names(fully_filtered_data)) { ti_html <- fully_filtered_data %>% distinct(Council_District) %>% mutate(H = "<p>Err</p>") %>% select(Council_District, TopIncidentsHTML=H) } else { ti_filtered <- fully_filtered_data %>% filter(n() > 0) %>% group_by(Council_District, Incident) %>% summarize(N = n(), .groups = "drop") %>% group_by(Council_District) %>% arrange(desc(N)) %>% slice_head(n = 3) %>% ungroup(); ti_html <- ti_filtered %>% group_by(Council_District) %>% summarise( H = paste0("<ol>", paste0("<li>", htmlEscape(Incident), " (", N, ")</li>", collapse = ""), "</ol>"), .groups = "drop" ) %>% select(Council_District, TopIncidentsHTML=H) } } else { ti_html <- fully_filtered_data %>% group_by(Council_District) %>% summarise(N = n(), .groups = "drop") %>% mutate(H = paste0("<p><b>Selected:</b> ", htmlEscape(input$selected_incident), " (", N, ")</p>")) %>% select(Council_District, TopIncidentsHTML=H) }
+        
+        # Join Numerator, Denominator, Popups, CMs
+        aggregated_data <- base_shapes %>%
+          left_join(district_summary, by = c("district_id" = "Council_District")) %>%
+          left_join(denominator_summary, by = c("district_id" = "Council_District")) %>% # Join denominator
+          left_join(council_members_lookup, by = c("district_id" = "Council_District")) %>%
+          left_join(ti_html, by = c("district_id" = "Council_District")) %>%
+          mutate(
+            Level_ID = district_id, Level_Name = paste("District", district_id),
+            Council_Member_Name = ifelse(is.na(Council_Member), "Unavailable", Council_Member),
+            Total_Incidents = ifelse(is.na(Total_Incidents), 0, Total_Incidents), # Numerator
+            Denominator_Total = ifelse(is.na(Denominator_Total), 0, Denominator_Total),
+            # Calculate Percentage (Numerator / Denominator)
+            Percent_Selected_Status = ifelse(Denominator_Total > 0, round((Total_Incidents / Denominator_Total) * 100, 1), 0),
+            TopIncidentsHTML = case_when( is.na(TopIncidentsHTML) & Total_Incidents > 0 ~ "<p>Details N/A</p>", Total_Incidents == 0 ~ "<p>None</p>", is.na(TopIncidentsHTML) ~ "<p>Err</p>", TRUE ~ TopIncidentsHTML )
+          )
+      }
+    } else if (level == "Boroughs") {
+      base_shapes <- nyc_boroughs; req(base_shapes)
+      # Calculate Denominator Count by Borough
+      denominator_summary <- partially_filtered_data %>%
+        group_by(Borough) %>% # Use standardized Borough column
+        summarize(Denominator_Total = n(), .groups = "drop")
+      
+      if (nrow(fully_filtered_data) == 0 || !"Borough" %in% names(fully_filtered_data)) {
+        aggregated_data <- base_shapes %>%
+          left_join(denominator_summary, by = "Borough") %>% # Still join denominator
+          mutate( Level_ID = Borough, Level_Name = tools::toTitleCase(tolower(Borough)), Council_Member_Name = NA_character_, Total_Incidents = 0, Denominator_Total = ifelse(is.na(Denominator_Total), 0, Denominator_Total), Percent_Selected_Status = 0, TopIncidentsHTML = "<p>None</p>" )
+      } else {
+        # Calculate Numerator Counts
+        borough_summary <- fully_filtered_data %>% group_by(Borough) %>% summarize(Total_Incidents = n(), .groups = "drop")
+        # Top 3 Incidents HTML
+        if (input$selected_incident == "All Incidents") { if (!"Incident" %in% names(fully_filtered_data)) { ti_html <- fully_filtered_data %>% distinct(Borough) %>% mutate(H = "<p>Err</p>") %>% select(Borough, TopIncidentsHTML=H) } else { ti_filtered <- fully_filtered_data %>% filter(n() > 0) %>% group_by(Borough, Incident) %>% summarize(N = n(), .groups = "drop") %>% group_by(Borough) %>% arrange(desc(N)) %>% slice_head(n = 3) %>% ungroup(); ti_html <- ti_filtered %>% group_by(Borough) %>% summarise( H = paste0("<ol>", paste0("<li>", htmlEscape(Incident), " (", N, ")</li>", collapse = ""), "</ol>"), .groups = "drop" ) %>% select(Borough, TopIncidentsHTML=H) } } else { ti_html <- fully_filtered_data %>% group_by(Borough) %>% summarise(N = n(), .groups = "drop") %>% mutate(H = paste0("<p><b>Selected:</b> ", htmlEscape(input$selected_incident), " (", N, ")</p>")) %>% select(Borough, TopIncidentsHTML=H) }
+        
+        # Join Numerator, Denominator, Popups
+        aggregated_data <- base_shapes %>%
+          left_join(borough_summary, by = "Borough") %>%
+          left_join(denominator_summary, by = "Borough") %>% # Join denominator
+          left_join(ti_html, by = "Borough") %>%
+          mutate(
+            Level_ID = Borough, Level_Name = tools::toTitleCase(tolower(Borough)), Council_Member_Name = NA_character_,
+            Total_Incidents = ifelse(is.na(Total_Incidents), 0, Total_Incidents), # Numerator
+            Denominator_Total = ifelse(is.na(Denominator_Total), 0, Denominator_Total),
+            # Calculate Percentage
+            Percent_Selected_Status = ifelse(Denominator_Total > 0, round((Total_Incidents / Denominator_Total) * 100, 1), 0),
+            TopIncidentsHTML = case_when( is.na(TopIncidentsHTML) & Total_Incidents > 0 ~ "<p>Details N/A</p>", Total_Incidents == 0 ~ "<p>None</p>", is.na(TopIncidentsHTML) ~ "<p>Err</p>", TRUE ~ TopIncidentsHTML ) )
+      }
+    } else { return(NULL) } # Should not happen
     
-    map_data_agg <- nyc_districts_base %>%
-      left_join(district_summary, by = c("district_id" = "Council_District")) %>%
-      left_join(council_members_lookup, by = c("district_id" = "Council_District")) %>%
-      left_join(top_incidents_html, by = c("district_id" = "Council_District")) %>%
-      mutate(
-        Total_Incidents = ifelse(is.na(Total_Incidents), 0, Total_Incidents),
-        Council_Member = ifelse(is.na(Council_Member), "Data Unavailable", Council_Member),
-        TopIncidentsHTML = case_when(
-          Total_Incidents == 0 ~ "<p>No incidents match filter.</p>",
-          is.na(TopIncidentsHTML) ~ "<p>Incident data processing error.</p>", TRUE ~ TopIncidentsHTML
-        )
-      )
-    return(map_data_agg)
+    # Final check and return
+    # <<< Ensure Percent_Selected_Status is in required cols list if needed downstream (e.g. for popups) >>>
+    required_output_cols <- c("Level_ID", "Level_Name", "Council_Member_Name", "Total_Incidents", "Percent_Selected_Status", "TopIncidentsHTML", "geometry")
+    if(!is.null(aggregated_data) && inherits(aggregated_data, "sf") && all(required_output_cols %in% names(aggregated_data))) {
+      message(glue("Aggregation success for {level}")); return(aggregated_data)
+    } else {
+      message(glue("Aggregation FAILED for {level} or missing columns. Check required: {paste(required_output_cols, collapse=', ')} vs actual: {paste(names(aggregated_data), collapse=', ')}"));
+      return(NULL)
+    }
   })
+  
   
   # --- Render Leaflet Map ---
   output$councilMap <- renderLeaflet({
-    map_data <- reactive_map_data()
-    req(nrow(map_data) > 0)
+    message("Rendering map...")
+    map_display_data <- reactive_map_data()
+    req(map_display_data, inherits(map_display_data, "sf"), nrow(map_display_data) > 0)
+    message("Map data validated.")
     
-    bins <- c(0, 5, 10, 20, 40, 60, Inf)
-    labels <- c("0 - 5", "5 - 10", "10 - 20", "20 - 40", "40 - 60", "60 - Inf")
+    # Dynamic Bins/Labels
+    bins_district <- c(0, 5, 10, 20, 40, 60, Inf); labels_district <- c("0 - 4", "5 - 9", "10 - 19", "20 - 39", "40 - 59", "60+")
+    bins_borough <- c(0, 50, 100, 200, 300, 400, Inf); labels_borough <- c("0 - 49", "50 - 99", "100 - 199", "200 - 299", "300 - 399", "400+")
+    if (input$map_level == "Districts") { current_bins <- bins_district; current_labels <- labels_district } else { current_bins <- bins_borough; current_labels <- labels_borough }
     
-    max_incidents <- max(map_data$Total_Incidents, na.rm = TRUE)
-    palette_domain <- if (max_incidents > 0) map_data$Total_Incidents else c(0, 1)
+    # Palette
+    # Color based on Total_Incidents (which IS the numerator count reflecting all filters)
+    max_incidents <- max(map_display_data$Total_Incidents, na.rm = TRUE); palette_domain <- if(max_incidents > 0 && !is.na(max_incidents)) map_display_data$Total_Incidents else c(0, 1)
+    pal <- councildown::colorBin( palette = "nycc_blue", domain = palette_domain, bins = current_bins, na.color = "#E0E0E0", right = FALSE )
     
-    pal <- councildown::colorBin(
-      palette = "nycc_blue", domain = palette_domain, bins = bins,
-      na.color = "#E0E0E0",
-      right = FALSE
-    )
+    # Legend Title
+    level_text <- tools::toTitleCase(input$map_level); year_text_legend <- ifelse(input$selected_year=='Overall', '23-24', input$selected_year); incident_text_legend <- str_trunc(input$selected_incident, 20); legend_title <- glue::glue("{level_text} Incidents ({year_text_legend}, {incident_text_legend})")
     
-    popup_content <- lapply(seq_len(nrow(map_data)), function(i) {
-      row <- map_data[i, ]
-      year_text <- ifelse(input$selected_year == "Overall", "2023-2024", input$selected_year)
-      incident_text <- ifelse(input$selected_incident == "All Incidents", "All Incidents", input$selected_incident)
-      popup_title <- glue::glue("<h4>District {htmlEscape(row$district_id)} ({year_text})</h4>")
-      popup_body <- paste0(
-        "<p><b>Council Member:</b> ", htmlEscape(row$Council_Member), "</p>",
-        "<p><b>Selected Filter:</b> ", htmlEscape(incident_text), "</p>",
-        "<p><b>Total Incidents (matching filter):</b> ", row$Total_Incidents, "</p><hr>",
-        "<b>Incident Details:</b>", row$TopIncidentsHTML
+    # <<< MODIFIED Popups >>>
+    popup_content <- lapply(seq_len(nrow(map_display_data)), function(i) {
+      row <- map_display_data[i, ]
+      year_text_popup <- ifelse(input$selected_year == "Overall", "2023-2024", input$selected_year)
+      incident_text_popup <- ifelse(input$selected_incident == "All Incidents", "All Incidents", htmlEscape(input$selected_incident))
+      status_text_popup <- ifelse(input$selected_status == "All Statuses", "All", htmlEscape(input$selected_status))
+      
+      popup_title <- glue::glue("<h4>{htmlEscape(row$Level_Name)} ({year_text_popup})</h4>")
+      
+      # Start building popup body
+      popup_body_parts <- c(
+        paste0("<p><b>Incident Filter:</b> ", incident_text_popup, "</p>"),
+        paste0("<p><b>Status Filter:</b> ", status_text_popup, "</p>")
       )
+      # Add Council Member only for Districts
+      if (input$map_level == "Districts") {
+        popup_body_parts <- c(popup_body_parts, paste0("<p><b>Council Member:</b> ", htmlEscape(row$Council_Member_Name), "</p>"))
+      }
+      
+      popup_body_parts <- c(popup_body_parts,
+                            paste0("<p><b>Total Incidents (matching ALL filters):</b> ", row$Total_Incidents, "</p>")
+      )
+      
+      # Conditionally add the Percentage Line
+      if (input$selected_status != "All Statuses") {
+        # Check if Percent_Selected_Status column exists before using it
+        if("Percent_Selected_Status" %in% names(row)){
+          percent_label <- glue("% {htmlEscape(input$selected_status)}")
+          popup_body_parts <- c(popup_body_parts,
+                                paste0("<p><b>", percent_label, " (of Year/Type Total):</b> ", sprintf("%.1f%%", row$Percent_Selected_Status), "</p>") )
+        } else {
+          popup_body_parts <- c(popup_body_parts, "<p><i>Percentage calculation error.</i></p>")
+        }
+      }
+      
+      popup_body_parts <- c(popup_body_parts, "<hr>", "<b>Incident Details (Top 3 if 'All Incidents' selected):</b>",
+                            ifelse(!is.na(row$TopIncidentsHTML), row$TopIncidentsHTML, "<p>N/A</p>") )
+      
+      # Combine parts
+      popup_body <- paste(popup_body_parts, collapse="")
       councilPopup(paste0(popup_title, popup_body))
     })
     
-    leaflet(map_data, options = leafletOptions(zoomControl = FALSE, attributionControl = FALSE)) %>%
-      addCouncilStyle(add_dists = TRUE, dist_year = "2023") %>%
+    # Leaflet Map Creation
+    leaflet(map_display_data, options = leafletOptions(zoomControl = FALSE, attributionControl = FALSE)) %>%
+      councildown::addCouncilStyle(add_dists = TRUE, dist_year = "2023") %>%
       addProviderTiles(providers$CartoDB.Positron, group = "Basemap") %>%
       addPolygons(
         fillColor = ~pal(Total_Incidents), weight = 1, opacity = 1, color = "white",
-        dashArray = "3", fillOpacity = 0.7,
-        highlightOptions = highlightOptions(
-          weight = 3, color = "#666", dashArray = "", fillOpacity = 0.9, bringToFront = TRUE
-        ),
-        label = ~paste0("District ", district_id, ": ", Total_Incidents, " incidents"),
-        popup = popup_content, group = "Districts"
+        dashArray = "3", fillOpacity = 0.7, group = "Data Layer",
+        highlightOptions = highlightOptions(weight = 3, color = "#666", dashArray = "", fillOpacity = 0.9, bringToFront = TRUE ),
+        label = ~paste0(Level_Name, ": ", Total_Incidents, " incidents"),
+        popup = popup_content
       ) %>%
       addLegend_decreasing(
-        position = "bottomright", pal = pal,
-        title = glue::glue("Incidents ({ifelse(input$selected_year=='Overall', '23-24', input$selected_year)}, {str_trunc(input$selected_incident, 20)})"),
-        values = ~Total_Incidents, opacity = 0.8, decreasing = TRUE,
-        labFormat = function(type, cuts, p) { labels }
+        position = "bottomright", pal = pal, title = legend_title, values = ~Total_Incidents,
+        opacity = 0.8, decreasing = TRUE, labFormat = function(type, cuts, p) { current_labels }
       ) %>%
-      htmlwidgets::onRender("
-        function(el, x) { L.control.zoom({ position: 'topright' }).addTo(this); }
-      ") %>%
-      addEasyButton(easyButton(
-        icon="fa-globe", title="Zoom to NYC",
-        onClick=JS("function(btn, map){ map.setView([40.7128, -74.0060], 10); }")
-      )) %>%
+      htmlwidgets::onRender(" function(el, x) { L.control.zoom({ position: 'topright' }).addTo(this); } ") %>%
+      addEasyButton(easyButton( icon="fa-globe", title="Zoom to NYC", onClick=JS("function(btn, map){ map.setView([40.7128, -74.0060], 10); }") )) %>%
       addLayersControl(
-        baseGroups = c("Basemap"), overlayGroups = c("Districts"),
+        baseGroups = c("Basemap"),
+        overlayGroups = c("Data Layer"),
         options = layersControlOptions(collapsed = TRUE, position = "bottomleft")
       )
     
   }) # End renderLeaflet
-  
 } # End server function
+
 
 # --- 4. Run the App ---
 shinyApp(ui = ui, server = server)

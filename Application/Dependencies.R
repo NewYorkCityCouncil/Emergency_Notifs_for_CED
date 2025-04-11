@@ -1,5 +1,5 @@
 # --- 0. Libraries ---
-list.of.packages <- c("shiny", "readxl", "writexl", "dplyr", "tidyr", "ggplot2", 
+list.of.packages <- c("shiny", "shinyjs", "readxl", "writexl", "dplyr", "tidyr", "ggplot2", 
                       "lubridate", "stringr", "knitr", "kableExtra", "sf", "leaflet", "leaflet.extras",
                       "htmltools", "htmlwidgets", "Kendall", "glue")
 # checks if packages has been previously installed

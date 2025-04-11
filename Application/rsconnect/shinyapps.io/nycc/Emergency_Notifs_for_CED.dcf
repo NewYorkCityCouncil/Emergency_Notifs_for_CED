@@ -5,7 +5,7 @@ account: nycc
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 14480442
-bundleId: 10094411
+bundleId: 10100395
 url: https://nycc.shinyapps.io/Emergency_Notifs_for_CED/
 version: 1
 asMultiple: FALSE
